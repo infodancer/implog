@@ -14,7 +14,6 @@ import (
 	"github.com/infodancer/implog/httplog"
 	"github.com/infodancer/implog/logstore/mysql"
 
-	"github.com/infodancer/implog/logentry"
 	"github.com/infodancer/implog/logstore"
 )
 
@@ -96,14 +95,6 @@ func main() {
 	}
 }
 
-func writeLog(logfile string, entry logentry.LogEntry, store logstore.LogStore) error {
-	ctx := context.Background()
-	if !entry.IsParseError() {
-		store.WriteLogEntry(ctx, entry)
-	}
-	return nil
-}
-
 // importLog imports a line oriented log file, transparently handling gzip compression
 func importLog(file string, logtype string, store logstore.LogStore) error {
 	log.Printf("Processing: %v\n", file)
@@ -139,17 +130,20 @@ func importLog(file string, logtype string, store logstore.LogStore) error {
 
 	var lc int64
 	for scanner.Scan() {
+		ctx := context.Background()
 		line := scanner.Text()
-		var entry logentry.LogEntry
 		if strings.EqualFold(logtype, "HTTP") {
-			entry, err = httplog.ParseLogLine(line)
+			entrydata, err := httplog.ParseLogLine(line)
 			if err != nil {
 				log.Printf("error parsing line %v in %v: %v\n", lc, file, err)
 				log.Println(line)
 			}
+			err = store.WriteHTTPLogEntry(ctx, entrydata)
+			if err != nil {
+				log.Printf("error: %v", err)
+			}
 		}
 		lc++
-		writeLog(file, entry, store)
 	}
 	err = scanner.Err()
 	if err != nil {

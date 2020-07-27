@@ -8,4 +8,6 @@ type LogEntry interface {
 	IsParseError() bool
 	// GetLogType reports the type of the log that this entry originated from
 	GetLogType() string
+	// GetLogFileName reports the name of the log file that this entry originated from
+	GetLogFile() string
 }

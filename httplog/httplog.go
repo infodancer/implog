@@ -8,11 +8,12 @@ import (
 	"time"
 )
 
-// Entry represents a standard HTTP log format
-type Entry struct {
+// EntryData represents a standard HTTP log format
+type EntryData struct {
 	UUID            []byte
 	isParseError    bool
 	logtype         string
+	logfile         string
 	IPAddress       string
 	ClientIdent     string
 	ClientAuth      string
@@ -28,20 +29,82 @@ type Entry struct {
 	ClientVersion   string
 }
 
-func (e *Entry) IsParseError() bool {
+// Entry defines the interface for HTTP log entries
+type Entry interface {
+	IsParseError() bool
+	GetLogType() string
+	GetLogFile() string
+	GetUUID() []byte
+	GetIPAddress() string
+	GetClientIdent() string
+	GetClientAuth() string
+	GetClientVersion() string
+	GetRequestMethod() string
+	GetRequestProtocol() string
+	GetRequestURI() string
+	GetStatus() int64
+	GetSize() int64
+	GetReferrer() string
+}
+
+func (e *EntryData) IsParseError() bool {
 	return e.isParseError
 }
 
-func (e *Entry) GetLogType() string {
+func (e *EntryData) GetLogType() string {
 	return e.logtype
 }
 
-func (e *Entry) GetUUID() []byte {
+func (e *EntryData) GetLogFile() string {
+	return e.logfile
+}
+
+func (e *EntryData) GetUUID() []byte {
 	return e.UUID
 }
 
-func ParseLogLine(line string) (*Entry, error) {
-	result := Entry{}
+func (e *EntryData) GetIPAddress() string {
+	return e.IPAddress
+}
+
+func (e *EntryData) GetClientIdent() string {
+	return e.ClientIdent
+}
+
+func (e *EntryData) GetClientAuth() string {
+	return e.ClientAuth
+}
+
+func (e *EntryData) GetClientVersion() string {
+	return e.ClientVersion
+}
+
+func (e *EntryData) GetRequestMethod() string {
+	return e.RequestMethod
+}
+
+func (e *EntryData) GetRequestProtocol() string {
+	return e.RequestProtocol
+}
+
+func (e *EntryData) GetRequestURI() string {
+	return e.RequestURI
+}
+
+func (e *EntryData) GetStatus() int64 {
+	return e.Status
+}
+
+func (e *EntryData) GetSize() int64 {
+	return e.Status
+}
+
+func (e *EntryData) GetReferrer() string {
+	return e.Referrer
+}
+
+func ParseLogLine(line string) (*EntryData, error) {
+	result := EntryData{}
 
 	// Hash the line for UUID to avoid duplicates
 	bytes := []byte(line)

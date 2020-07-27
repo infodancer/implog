@@ -4,14 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"log"
-	"strings"
 
 	// Load the mysql driver
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/infodancer/implog/logentry"
+	"github.com/google/uuid"
+	"github.com/infodancer/implog/httplog"
 )
 
 type MysqlLogStore struct {
@@ -26,7 +25,7 @@ const idField = "id BINARY(16) PRIMARY KEY"
 const createLogFileTable = createTable + "LOGFILE (" + idField + ", filename VARCHAR(255), created TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
 const createLogURITable = createTable + "LOGURI (" + idField + ", uri VARCHAR(255), created TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
 const createLogReferrerTable = createTable + "LOGREFERRER (" + idField + ", uri VARCHAR(255), created TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
-const createLogEntryTable = createTable + "LOGENTRY (" + idField + ", logfile_id INT, loguri_id INT, ipaddress varchar(16), clientident varchar(255), clientauth varchar(255), clientversion varchar(255), requestmethod VARCHAR(16), requestprotocol VARCHAR(16), size BIGINT, status INT, referrer VARCHAR(255), FOREIGN KEY (logfile_id) REFERENCES LOGFILE(id), FOREIGN KEY (loguri_id) REFERENCES LOGURI(id))"
+const createLogEntryTable = createTable + "LOGENTRY (" + idField + ", logfile_id INT, loguri_id INT, ipaddress varchar(16), clientident varchar(255), clientauth varchar(255), clientversion varchar(255), requestmethod VARCHAR(16), requestprotocol VARCHAR(16), size BIGINT, status INT, referrer VARCHAR(255))"
 const createClientTable = createTable + "CLIENT ()"
 const dropLogFileTable = dropTable + " LOGFILE"
 const dropLogEntryTable = dropTable + " LOGENTRY"
@@ -132,13 +131,36 @@ func (s *MysqlLogStore) Init(ctx context.Context) error {
 	return nil
 }
 
-// Close creates the table structure for storing records, if necessary
+// Close closes the database connection
 func (s *MysqlLogStore) Close() {
 	return
 }
 
-// WriteLogEntry writes a log entry to the data store
-func (s *MysqlLogStore) WriteLogEntry(ctx context.Context, entry logentry.LogEntry) error {
+// LookupURI retrieves the file id of a log file
+func (s *MysqlLogStore) LookupURI(uri string) (string, error) {
+	return uuid.New().String(), nil
+}
+
+// LookupLogFile retrieves the file id of a log file
+func (s *MysqlLogStore) LookupLogFile(logfile string) (string, error) {
+	return uuid.New().String(), nil
+}
+
+// LookupIPAddress retrieves the uuid for an ip address
+func (s *MysqlLogStore) LookupIPAddress(ip string) (string, error) {
+	return uuid.New().String(), nil
+}
+
+// LookupReferrer retrieves the referrer
+func (s *MysqlLogStore) LookupReferrer(referrer string) (string, error) {
+	return uuid.New().String(), nil
+}
+
+// Params is a map of arguments to sql
+type Params map[string]interface{}
+
+// WriteHTTPLogEntry writes an http log entry to the log store
+func (s *MysqlLogStore) WriteHTTPLogEntry(ctx context.Context, entry httplog.Entry) error {
 	uuid := base64.URLEncoding.EncodeToString(entry.GetUUID())
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
@@ -146,30 +168,42 @@ func (s *MysqlLogStore) WriteLogEntry(ctx context.Context, entry logentry.LogEnt
 		return err
 	}
 	defer tx.Rollback()
+	log.Printf("UUID: %v", uuid)
+
+	// Look up logfile (inserting if necessary)
+	fileID, err := s.LookupLogFile(entry.GetLogFile())
+
+	// Look up ip address (inserting if necessary)
+	s.LookupIPAddress(entry.GetIPAddress())
+	// Look up URI (inserting if necessary)
+	uriID, err := s.LookupURI(entry.GetRequestURI())
+	// Look up referrer (inserting if necessary)
+	referrerID, err := s.LookupReferrer(entry.GetReferrer())
+	// Insert log itself
+
+	args := Params{
+		`id`:              uuid,
+		`logfile_id`:      fileID,
+		`loguri_id`:       uriID,
+		`ipaddress`:       entry.GetIPAddress(),
+		`clientident`:     entry.GetClientIdent(),
+		`clientauth`:      entry.GetClientAuth(),
+		`clientversion`:   entry.GetClientVersion(),
+		`requestmethod`:   entry.GetRequestMethod(),
+		`requestprotocol`: entry.GetRequestProtocol(),
+		`size`:            entry.GetSize(),
+		`status`:          entry.GetStatus(),
+		`referrer_id`:     referrerID,
+	}
 
 	insert, err := s.db.PrepareContext(ctx, insertQuery)
 	defer insert.Close()
 
-	entrytype := entry.GetLogType()
-	if strings.EqualFold(entrytype, "HTTP") {
-		log.Printf("UUID: %v")
-		// Look up logfile (inserting if necessary)
-		fileID, err := LookupLogFile(entry.)
-
-		// Look up ip address (inserting if necessary)
-		// Look up URI (inserting if necessary)
-		// Look up referrer (inserting if necessary)
-		// Insert log itself
-
-		args := struct Params{}
-		_, err = insert.ExecContext(ctx, args)
-		if err != nil {
-			log.Printf("error inserting %v: %v", uuid, err)
-		}
-
-	} else {
-		return errors.New("Unrecognized entry type: " + entrytype)
+	_, err = insert.ExecContext(ctx, args)
+	if err != nil {
+		log.Printf("error inserting %v: %v", uuid, err)
 	}
 	tx.Commit()
+
 	return nil
 }
