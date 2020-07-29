@@ -10,12 +10,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"github.com/infodancer/implog/httplog"
 	"github.com/infodancer/implog/logstore/mysql"
 
 	"github.com/infodancer/implog/logstore"
 )
+
+var errorCount uint64
+var totalCount uint64
 
 func main() {
 	var err error
@@ -141,7 +145,9 @@ func importLog(file string, logtype string, store logstore.LogStore) error {
 			err = store.WriteHTTPLogEntry(ctx, entrydata)
 			if err != nil {
 				log.Printf("error: %v", err)
+				atomic.AddUint64(&errorCount, 1)
 			}
+			atomic.AddUint64(&totalCount, 1)
 		}
 		lc++
 	}
@@ -150,6 +156,7 @@ func importLog(file string, logtype string, store logstore.LogStore) error {
 		log.Printf("error: %v", err)
 	}
 	log.Printf("parsed %v lines in %v\n", lc, file)
+	log.Printf("inserted %v; errors %v\n", totalCount, errorCount)
 	return nil
 }
 

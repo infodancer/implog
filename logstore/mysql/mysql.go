@@ -168,7 +168,7 @@ func (s *MysqlLogStore) WriteHTTPLogEntry(ctx context.Context, entry httplog.Ent
 		return err
 	}
 	defer tx.Rollback()
-	log.Printf("UUID: %v", uuid)
+	// log.Printf("UUID: %v", uuid)
 
 	// Look up logfile (inserting if necessary)
 	fileID, err := s.LookupLogFile(entry.GetLogFile())
@@ -189,6 +189,7 @@ func (s *MysqlLogStore) WriteHTTPLogEntry(ctx context.Context, entry httplog.Ent
 		entry.GetSize(), entry.GetStatus(), referrerID)
 	if err != nil {
 		log.Printf("error inserting %v: %v", uuid, err)
+		return err
 	}
 	tx.Commit()
 
