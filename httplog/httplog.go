@@ -96,7 +96,7 @@ func (e *EntryData) GetStatus() int64 {
 }
 
 func (e *EntryData) GetSize() int64 {
-	return e.Status
+	return e.Size
 }
 
 func (e *EntryData) GetReferrer() string {
@@ -105,7 +105,7 @@ func (e *EntryData) GetReferrer() string {
 
 func ParseLogLine(line string) (*EntryData, error) {
 	result := EntryData{}
-
+	result.isParseError = true
 	// Hash the line for UUID to avoid duplicates
 	bytes := []byte(line)
 	hasher := sha1.New()

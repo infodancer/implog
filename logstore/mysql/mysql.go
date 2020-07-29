@@ -14,9 +14,10 @@ import (
 )
 
 type MysqlLogStore struct {
-	dbdriver     string
-	dbconnection string
-	db           *sql.DB
+	dbdriver       string
+	dbconnection   string
+	insertLogEntry *sql.Stmt
+	db             *sql.DB
 }
 
 const createTable = "CREATE TABLE IF NOT EXISTS "
@@ -100,6 +101,8 @@ func (s *MysqlLogStore) Init(ctx context.Context) error {
 	}
 	s.db.Begin()
 	defer tx.Rollback()
+	s.db.SetConnMaxLifetime(0)
+
 	fmt.Printf("Init: %v\n", createLogFileTable)
 	_, err = s.db.Exec(createLogFileTable)
 	if err != nil {
@@ -128,11 +131,18 @@ func (s *MysqlLogStore) Init(ctx context.Context) error {
 		return err
 	}
 
+	s.insertLogEntry, err = s.db.PrepareContext(ctx, insertQuery)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
 	return nil
 }
 
 // Close closes the database connection
 func (s *MysqlLogStore) Close() {
+	s.insertLogEntry.Close()
 	return
 }
 
@@ -161,6 +171,9 @@ type Params map[string]interface{}
 
 // WriteHTTPLogEntry writes an http log entry to the log store
 func (s *MysqlLogStore) WriteHTTPLogEntry(ctx context.Context, entry httplog.Entry) error {
+	if entry.IsParseError() {
+		return nil
+	}
 	uuid := base64.URLEncoding.EncodeToString(entry.GetUUID())
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
@@ -181,10 +194,7 @@ func (s *MysqlLogStore) WriteHTTPLogEntry(ctx context.Context, entry httplog.Ent
 	referrerID, err := s.LookupReferrer(entry.GetReferrer())
 	// Insert log itself
 
-	insert, err := s.db.PrepareContext(ctx, insertQuery)
-	defer insert.Close()
-
-	_, err = insert.ExecContext(ctx, uuid, fileID, uriID, entry.GetIPAddress(), entry.GetClientIdent(),
+	_, err = s.insertLogEntry.ExecContext(ctx, uuid, fileID, uriID, entry.GetIPAddress(), entry.GetClientIdent(),
 		entry.GetClientAuth(), entry.GetClientVersion(), entry.GetRequestMethod(), entry.GetRequestProtocol(),
 		entry.GetSize(), entry.GetStatus(), referrerID)
 	if err != nil {

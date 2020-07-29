@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/infodancer/implog/httplog"
@@ -28,7 +29,8 @@ func main() {
 	file := flag.String("logfile", "", "The log file to import")
 	dbdriver := flag.String("dbdriver", "mysql", "The type of database to use as a log store (defaults to mysql)")
 	dbconnection := flag.String("dbconnection", "", "The name or ip address of the database host")
-	logname := flag.String("logname", "", "The name of the log being read (usually, the hostname of the virtual host)")
+	numCPU := flag.Int("cpu", 4, "The number of cpus to use simultaneously")
+	// logname := flag.String("logname", "", "The name of the log being read (usually, the hostname of the virtual host)")
 	flag.Parse()
 
 	fmt.Printf("Opening logstore...\n")
@@ -92,15 +94,27 @@ func main() {
 			return
 		}
 	}
-
-	log.Printf("Entering log processing loop for log %v...\n", *logname)
+	log.Printf("Max goroutines: %v\n", *numCPU)
+	var wg sync.WaitGroup
+	cpu := 0
 	for _, lf := range files {
-		importLog(lf, *logtype, store)
+		if cpu >= *numCPU {
+			wg.Wait()
+			cpu = 0
+		}
+		cpu++
+		wg.Add(1)
+		go importLog(&wg, lf, *logtype, store)
 	}
+	wg.Wait()
+	log.Printf("Total inserted %v; total errors %v\n", totalCount, errorCount)
 }
 
 // importLog imports a line oriented log file, transparently handling gzip compression
-func importLog(file string, logtype string, store logstore.LogStore) error {
+func importLog(wg *sync.WaitGroup, file string, logtype string, store logstore.LogStore) error {
+	defer wg.Done()
+	var fileInsertCount uint64
+	var fileErrorCount uint64
 	log.Printf("Processing: %v\n", file)
 
 	f, err := os.Open(file)
@@ -121,7 +135,6 @@ func importLog(file string, logtype string, store logstore.LogStore) error {
 		return err
 	}
 	if gzipped {
-		log.Println("Detected gzipped input, decompressing...")
 		gzipReader, err := gzip.NewReader(bReader)
 		if err != nil {
 			log.Printf("err during decompression: %v\n", err)
@@ -144,10 +157,10 @@ func importLog(file string, logtype string, store logstore.LogStore) error {
 			}
 			err = store.WriteHTTPLogEntry(ctx, entrydata)
 			if err != nil {
-				log.Printf("error: %v", err)
-				atomic.AddUint64(&errorCount, 1)
+				log.Printf("error adding to store: %v", err)
+				fileErrorCount++
 			}
-			atomic.AddUint64(&totalCount, 1)
+			fileInsertCount++
 		}
 		lc++
 	}
@@ -156,7 +169,9 @@ func importLog(file string, logtype string, store logstore.LogStore) error {
 		log.Printf("error: %v", err)
 	}
 	log.Printf("parsed %v lines in %v\n", lc, file)
-	log.Printf("inserted %v; errors %v\n", totalCount, errorCount)
+	log.Printf("inserted %v; errors %v\n", fileInsertCount, fileErrorCount)
+	atomic.AddUint64(&errorCount, fileErrorCount)
+	atomic.AddUint64(&totalCount, fileInsertCount)
 	return nil
 }
 
