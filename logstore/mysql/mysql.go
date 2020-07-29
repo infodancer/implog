@@ -181,25 +181,12 @@ func (s *MysqlLogStore) WriteHTTPLogEntry(ctx context.Context, entry httplog.Ent
 	referrerID, err := s.LookupReferrer(entry.GetReferrer())
 	// Insert log itself
 
-	args := Params{
-		`id`:              uuid,
-		`logfile_id`:      fileID,
-		`loguri_id`:       uriID,
-		`ipaddress`:       entry.GetIPAddress(),
-		`clientident`:     entry.GetClientIdent(),
-		`clientauth`:      entry.GetClientAuth(),
-		`clientversion`:   entry.GetClientVersion(),
-		`requestmethod`:   entry.GetRequestMethod(),
-		`requestprotocol`: entry.GetRequestProtocol(),
-		`size`:            entry.GetSize(),
-		`status`:          entry.GetStatus(),
-		`referrer_id`:     referrerID,
-	}
-
 	insert, err := s.db.PrepareContext(ctx, insertQuery)
 	defer insert.Close()
 
-	_, err = insert.ExecContext(ctx, args)
+	_, err = insert.ExecContext(ctx, uuid, fileID, uriID, entry.GetIPAddress(), entry.GetClientIdent(),
+		entry.GetClientAuth(), entry.GetClientVersion(), entry.GetRequestMethod(), entry.GetRequestProtocol(),
+		entry.GetSize(), entry.GetStatus(), referrerID)
 	if err != nil {
 		log.Printf("error inserting %v: %v", uuid, err)
 	}
