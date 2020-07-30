@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	// Load the mysql driver
@@ -16,13 +17,26 @@ import (
 
 // LogStore implements a log store in mysql
 type LogStore struct {
-	dbdriver       string
-	dbconnection   string
-	logfilecache   map[string]string
-	insertLogEntry *sql.Stmt
-	insertLogFile  *sql.Stmt
-	selectLogFile  *sql.Stmt
-	db             *sql.DB
+	dbdriver        string
+	dbconnection    string
+	lfcMutex        *sync.Mutex
+	ipcMutex        *sync.Mutex
+	uriMutex        *sync.Mutex
+	referMutex      *sync.Mutex
+	logfilecache    map[string]string
+	ipcache         map[string]string
+	uricache        map[string]string
+	refercache      map[string]string
+	insertLogEntry  *sql.Stmt
+	insertLogFile   *sql.Stmt
+	selectLogFile   *sql.Stmt
+	insertIPAddress *sql.Stmt
+	selectIPAddress *sql.Stmt
+	insertURI       *sql.Stmt
+	selectURI       *sql.Stmt
+	insertReferrer  *sql.Stmt
+	selectReferrer  *sql.Stmt
+	db              *sql.DB
 }
 
 const createTable = "CREATE TABLE IF NOT EXISTS "
@@ -30,6 +44,7 @@ const dropTable = "DROP TABLE IF EXISTS "
 const idField = "id BINARY(16) PRIMARY KEY"
 const createLogFileTable = createTable + "LOGFILE (" + idField + ", filename VARCHAR(255), created TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
 const createLogURITable = createTable + "LOGURI (" + idField + ", uri VARCHAR(255), created TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+const createLogIPTable = createTable + "LOGIP (" + idField + ", ip VARCHAR(16), created TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
 const createLogReferrerTable = createTable + "LOGREFERRER (" + idField + ", uri VARCHAR(255), created TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
 const createLogEntryTable = createTable + "LOGENTRY (" + idField + ", logfile_id INT, loguri_id INT, ipaddress varchar(16), clientident varchar(255), clientauth varchar(255), clientversion varchar(255), requestmethod VARCHAR(16), requestprotocol VARCHAR(16), size BIGINT, status INT, referrer VARCHAR(255))"
 const createClientTable = createTable + "CLIENT ()"
@@ -37,13 +52,18 @@ const dropLogFileTable = dropTable + " LOGFILE"
 const dropLogEntryTable = dropTable + " LOGENTRY"
 const dropLogURITable = dropTable + " LOGURI"
 const dropLogReferrerTable = dropTable + " LOGREFERRER"
+const dropLogIPTable = dropTable + " LOGIP"
 const insertQuery = "INSERT INTO LOGENTRY(id, logfile_id, loguri_id, ipaddress, clientident, clientauth, clientversion, requestmethod, requestprotocol, size, status, referrer) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
-const insertLogFile = "INSERT INTO LOGENTRY(id, logfile_id, loguri_id, ipaddress, clientident, clientauth, clientversion, requestmethod, requestprotocol, size, status, referrer) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
 
+// New defines the connection information for the log store
 func New(dbdriver string, dbconnection string) (*LogStore, error) {
 	result := LogStore{}
 	result.dbconnection = dbconnection
 	result.dbdriver = dbdriver
+	result.ipcMutex = &sync.Mutex{}
+	result.lfcMutex = &sync.Mutex{}
+	result.uriMutex = &sync.Mutex{}
+	result.referMutex = &sync.Mutex{}
 	return &result, nil
 }
 
@@ -73,9 +93,14 @@ func (s *LogStore) Clear(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	_, err = s.db.Exec(dropLogIPTable)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
+// Open creates a connection to the log store
 func (s *LogStore) Open() error {
 	var err error
 	// log.Printf("dbconnection: %v\n", s.dbconnection)
@@ -123,6 +148,13 @@ func (s *LogStore) Init(ctx context.Context) error {
 		return err
 	}
 
+	fmt.Printf("Init: %v\n", createLogIPTable)
+	_, err = s.db.Exec(createLogIPTable)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
 	fmt.Printf("Init: %v\n", createLogReferrerTable)
 	_, err = s.db.Exec(createLogReferrerTable)
 	if err != nil {
@@ -138,6 +170,10 @@ func (s *LogStore) Init(ctx context.Context) error {
 	}
 
 	s.logfilecache = make(map[string]string)
+	s.ipcache = make(map[string]string)
+	s.uricache = make(map[string]string)
+	s.refercache = make(map[string]string)
+
 	s.selectLogFile, err = s.db.PrepareContext(ctx, "SELECT id FROM LOGFILE WHERE filename = ?")
 	if err != nil {
 		fmt.Println(err)
@@ -145,6 +181,42 @@ func (s *LogStore) Init(ctx context.Context) error {
 	}
 
 	s.insertLogFile, err = s.db.PrepareContext(ctx, "INSERT INTO LOGFILE (id, filename, created) VALUES (?,?,?)")
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
+	s.selectIPAddress, err = s.db.PrepareContext(ctx, "SELECT id FROM LOGIP WHERE ip = ?")
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
+	s.insertIPAddress, err = s.db.PrepareContext(ctx, "INSERT INTO LOGIP (id, ip) VALUES (?,?)")
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
+	s.selectURI, err = s.db.PrepareContext(ctx, "SELECT id FROM LOGURI WHERE uri = ?")
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
+	s.insertURI, err = s.db.PrepareContext(ctx, "INSERT INTO LOGURI (id, uri) VALUES (?,?)")
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
+	s.selectReferrer, err = s.db.PrepareContext(ctx, "SELECT id FROM LOGREFERRER WHERE uri = ?")
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
+	s.insertReferrer, err = s.db.PrepareContext(ctx, "INSERT INTO LOGREFERRER (id, uri) VALUES (?,?)")
 	if err != nil {
 		fmt.Println(err)
 		return err
@@ -162,17 +234,51 @@ func (s *LogStore) Init(ctx context.Context) error {
 // Close closes the database connection
 func (s *LogStore) Close() {
 	s.insertLogEntry.Close()
+	s.selectLogFile.Close()
+	s.insertLogFile.Close()
+	s.selectURI.Close()
+	s.insertURI.Close()
+	s.selectIPAddress.Close()
+	s.insertIPAddress.Close()
+	s.selectReferrer.Close()
+	s.insertReferrer.Close()
 	return
 }
 
 // LookupURI retrieves the file id of a log file
 func (s *LogStore) LookupURI(uri string) (string, error) {
-	return uuid.New().String(), nil
+	s.uriMutex.Lock()
+	r := s.uricache[uri]
+	s.uriMutex.Unlock()
+	if r != "" {
+		return r, nil
+	}
+	var id string
+	err := s.selectURI.QueryRow(uri).Scan(&id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			id = uuid.New().String()
+			_, err = s.insertURI.Exec(id, uri)
+			if err != nil {
+				log.Printf("insert err: %v", err)
+				return "", err
+			}
+			s.uriMutex.Lock()
+			s.uricache[uri] = id
+			s.uriMutex.Unlock()
+			return id, nil
+		}
+		log.Printf("select err: %v", err)
+		return "", err
+	}
+	return id, nil
 }
 
 // LookupLogFile retrieves the file id of a log file
 func (s *LogStore) LookupLogFile(logfile string) (string, error) {
+	s.lfcMutex.Lock()
 	r := s.logfilecache[logfile]
+	s.lfcMutex.Unlock()
 	if r != "" {
 		return r, nil
 	}
@@ -186,7 +292,9 @@ func (s *LogStore) LookupLogFile(logfile string) (string, error) {
 				log.Printf("insert err: %v", err)
 				return "", err
 			}
+			s.lfcMutex.Lock()
 			s.logfilecache[logfile] = id
+			s.lfcMutex.Unlock()
 			return id, nil
 		}
 		log.Printf("select err: %v", err)
@@ -197,16 +305,61 @@ func (s *LogStore) LookupLogFile(logfile string) (string, error) {
 
 // LookupIPAddress retrieves the uuid for an ip address
 func (s *LogStore) LookupIPAddress(ip string) (string, error) {
-	return uuid.New().String(), nil
+	s.ipcMutex.Lock()
+	r := s.ipcache[ip]
+	s.ipcMutex.Unlock()
+	if r != "" {
+		return r, nil
+	}
+	var id string
+	err := s.selectIPAddress.QueryRow(ip).Scan(&id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			id = uuid.New().String()
+			_, err = s.insertIPAddress.Exec(id, ip)
+			if err != nil {
+				log.Printf("insert err: %v", err)
+				return "", err
+			}
+			s.ipcMutex.Lock()
+			s.ipcache[ip] = id
+			s.ipcMutex.Unlock()
+			return id, nil
+		}
+		log.Printf("select err: %v", err)
+		return "", err
+	}
+	return id, nil
 }
 
 // LookupReferrer retrieves the referrer
 func (s *LogStore) LookupReferrer(referrer string) (string, error) {
-	return uuid.New().String(), nil
+	s.referMutex.Lock()
+	r := s.refercache[referrer]
+	s.referMutex.Unlock()
+	if r != "" {
+		return r, nil
+	}
+	var id string
+	err := s.selectReferrer.QueryRow(referrer).Scan(&id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			id = uuid.New().String()
+			_, err = s.insertReferrer.Exec(id, referrer)
+			if err != nil {
+				log.Printf("insert err: %v", err)
+				return "", err
+			}
+			s.referMutex.Lock()
+			s.refercache[referrer] = id
+			s.referMutex.Unlock()
+			return id, nil
+		}
+		log.Printf("select err: %v", err)
+		return "", err
+	}
+	return id, nil
 }
-
-// Params is a map of arguments to sql
-type Params map[string]interface{}
 
 // WriteHTTPLogEntry writes an http log entry to the log store
 func (s *LogStore) WriteHTTPLogEntry(ctx context.Context, entry httplog.Entry) error {
