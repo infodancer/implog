@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/infodancer/implog/httplog"
 	"github.com/infodancer/implog/logstore/mysql"
@@ -116,6 +117,7 @@ func importLog(wg *sync.WaitGroup, file string, logtype string, store logstore.L
 	var fileInsertCount uint64
 	var fileErrorCount uint64
 	log.Printf("Processing: %v\n", file)
+	start := time.Now()
 
 	f, err := os.Open(file)
 	if err != nil {
@@ -154,6 +156,7 @@ func importLog(wg *sync.WaitGroup, file string, logtype string, store logstore.L
 			if err != nil {
 				log.Printf("error parsing line %v in %v: %v\n", lc, file, err)
 				log.Println(line)
+				continue
 			}
 			err = store.WriteHTTPLogEntry(ctx, entrydata)
 			if err != nil {
@@ -168,7 +171,10 @@ func importLog(wg *sync.WaitGroup, file string, logtype string, store logstore.L
 	if err != nil {
 		log.Printf("error: %v", err)
 	}
-	log.Printf("parsed %v lines in %v\n", lc, file)
+
+	t := time.Now()
+	elapsed := t.Sub(start)
+	log.Printf("parsed %v lines in %v taking %v \n", lc, file, elapsed)
 	log.Printf("inserted %v; errors %v\n", fileInsertCount, fileErrorCount)
 	atomic.AddUint64(&errorCount, fileErrorCount)
 	atomic.AddUint64(&totalCount, fileInsertCount)
