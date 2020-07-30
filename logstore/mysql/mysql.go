@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"time"
 
 	// Load the mysql driver
 	_ "github.com/go-sql-driver/mysql"
@@ -13,10 +14,14 @@ import (
 	"github.com/infodancer/implog/httplog"
 )
 
-type MysqlLogStore struct {
+// LogStore implements a log store in mysql
+type LogStore struct {
 	dbdriver       string
 	dbconnection   string
+	logfilecache   map[string]string
 	insertLogEntry *sql.Stmt
+	insertLogFile  *sql.Stmt
+	selectLogFile  *sql.Stmt
 	db             *sql.DB
 }
 
@@ -33,16 +38,17 @@ const dropLogEntryTable = dropTable + " LOGENTRY"
 const dropLogURITable = dropTable + " LOGURI"
 const dropLogReferrerTable = dropTable + " LOGREFERRER"
 const insertQuery = "INSERT INTO LOGENTRY(id, logfile_id, loguri_id, ipaddress, clientident, clientauth, clientversion, requestmethod, requestprotocol, size, status, referrer) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
+const insertLogFile = "INSERT INTO LOGENTRY(id, logfile_id, loguri_id, ipaddress, clientident, clientauth, clientversion, requestmethod, requestprotocol, size, status, referrer) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
 
-func New(dbdriver string, dbconnection string) (*MysqlLogStore, error) {
-	result := MysqlLogStore{}
+func New(dbdriver string, dbconnection string) (*LogStore, error) {
+	result := LogStore{}
 	result.dbconnection = dbconnection
 	result.dbdriver = dbdriver
 	return &result, nil
 }
 
 // Clear drops the tables used for storing log data, normally so they can be recreated in a new format
-func (s *MysqlLogStore) Clear(ctx context.Context) error {
+func (s *LogStore) Clear(ctx context.Context) error {
 	var err error
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -70,7 +76,7 @@ func (s *MysqlLogStore) Clear(ctx context.Context) error {
 	return nil
 }
 
-func (s *MysqlLogStore) Open() error {
+func (s *LogStore) Open() error {
 	var err error
 	// log.Printf("dbconnection: %v\n", s.dbconnection)
 	s.db, err = sql.Open(s.dbdriver, s.dbconnection)
@@ -83,7 +89,7 @@ func (s *MysqlLogStore) Open() error {
 }
 
 // Ping creates the table structure for storing records, if necessary
-func (s *MysqlLogStore) Ping(ctx context.Context) error {
+func (s *LogStore) Ping(ctx context.Context) error {
 	if err := s.db.PingContext(ctx); err != nil {
 		log.Fatal(err)
 		return err
@@ -92,7 +98,7 @@ func (s *MysqlLogStore) Ping(ctx context.Context) error {
 }
 
 // Init creates the table structure for storing records, if necessary
-func (s *MysqlLogStore) Init(ctx context.Context) error {
+func (s *LogStore) Init(ctx context.Context) error {
 	fmt.Printf("Init()\n")
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -131,6 +137,19 @@ func (s *MysqlLogStore) Init(ctx context.Context) error {
 		return err
 	}
 
+	s.logfilecache = make(map[string]string)
+	s.selectLogFile, err = s.db.PrepareContext(ctx, "SELECT id FROM LOGFILE WHERE filename = ?")
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
+	s.insertLogFile, err = s.db.PrepareContext(ctx, "INSERT INTO LOGFILE (id, filename, created) VALUES (?,?,?)")
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
 	s.insertLogEntry, err = s.db.PrepareContext(ctx, insertQuery)
 	if err != nil {
 		fmt.Println(err)
@@ -141,28 +160,48 @@ func (s *MysqlLogStore) Init(ctx context.Context) error {
 }
 
 // Close closes the database connection
-func (s *MysqlLogStore) Close() {
+func (s *LogStore) Close() {
 	s.insertLogEntry.Close()
 	return
 }
 
 // LookupURI retrieves the file id of a log file
-func (s *MysqlLogStore) LookupURI(uri string) (string, error) {
+func (s *LogStore) LookupURI(uri string) (string, error) {
 	return uuid.New().String(), nil
 }
 
 // LookupLogFile retrieves the file id of a log file
-func (s *MysqlLogStore) LookupLogFile(logfile string) (string, error) {
-	return uuid.New().String(), nil
+func (s *LogStore) LookupLogFile(logfile string) (string, error) {
+	r := s.logfilecache[logfile]
+	if r != "" {
+		return r, nil
+	}
+	var id string
+	err := s.selectLogFile.QueryRow(logfile).Scan(&id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			id = uuid.New().String()
+			_, err = s.insertLogFile.Exec(id, logfile, time.Now())
+			if err != nil {
+				log.Printf("insert err: %v", err)
+				return "", err
+			}
+			s.logfilecache[logfile] = id
+			return id, nil
+		}
+		log.Printf("select err: %v", err)
+		return "", err
+	}
+	return id, nil
 }
 
 // LookupIPAddress retrieves the uuid for an ip address
-func (s *MysqlLogStore) LookupIPAddress(ip string) (string, error) {
+func (s *LogStore) LookupIPAddress(ip string) (string, error) {
 	return uuid.New().String(), nil
 }
 
 // LookupReferrer retrieves the referrer
-func (s *MysqlLogStore) LookupReferrer(referrer string) (string, error) {
+func (s *LogStore) LookupReferrer(referrer string) (string, error) {
 	return uuid.New().String(), nil
 }
 
@@ -170,7 +209,7 @@ func (s *MysqlLogStore) LookupReferrer(referrer string) (string, error) {
 type Params map[string]interface{}
 
 // WriteHTTPLogEntry writes an http log entry to the log store
-func (s *MysqlLogStore) WriteHTTPLogEntry(ctx context.Context, entry httplog.Entry) error {
+func (s *LogStore) WriteHTTPLogEntry(ctx context.Context, entry httplog.Entry) error {
 	if entry.IsParseError() {
 		return nil
 	}

@@ -34,6 +34,7 @@ type Entry interface {
 	IsParseError() bool
 	GetLogType() string
 	GetLogFile() string
+	SetLogFile(file string)
 	GetUUID() []byte
 	GetIPAddress() string
 	GetClientIdent() string
@@ -57,6 +58,10 @@ func (e *EntryData) GetLogType() string {
 
 func (e *EntryData) GetLogFile() string {
 	return e.logfile
+}
+
+func (e *EntryData) SetLogFile(file string) {
+	e.logfile = file
 }
 
 func (e *EntryData) GetUUID() []byte {

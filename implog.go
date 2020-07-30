@@ -158,6 +158,7 @@ func importLog(wg *sync.WaitGroup, file string, logtype string, store logstore.L
 				log.Println(line)
 				continue
 			}
+			entrydata.SetLogFile(file)
 			err = store.WriteHTTPLogEntry(ctx, entrydata)
 			if err != nil {
 				log.Printf("error adding to store: %v", err)
