@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"net"
 	"sync"
 	"time"
 
@@ -42,9 +43,9 @@ type LogStore struct {
 const createTable = "CREATE TABLE IF NOT EXISTS "
 const dropTable = "DROP TABLE IF EXISTS "
 const idField = "id BINARY(16) PRIMARY KEY"
-const createLogFileTable = createTable + "LOGFILE (" + idField + ", filename VARCHAR(255), created TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+const createLogFileTable = createTable + "LOGFILE (" + idField + ", filename VARCHAR(255), modified TIMESTAMP, created TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
 const createLogURITable = createTable + "LOGURI (" + idField + ", uri VARCHAR(255), created TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
-const createLogIPTable = createTable + "LOGIP (" + idField + ", ip VARCHAR(16), created TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+const createLogIPTable = createTable + "LOGIP (" + idField + ", ip VARCHAR(16), name VARCHAR(255), created TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
 const createLogReferrerTable = createTable + "LOGREFERRER (" + idField + ", uri VARCHAR(255), created TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
 const createLogEntryTable = createTable + "LOGENTRY (" + idField + ", logfile_id INT, loguri_id INT, ipaddress varchar(16), clientident varchar(255), clientauth varchar(255), clientversion varchar(255), requestmethod VARCHAR(16), requestprotocol VARCHAR(16), size BIGINT, status INT, referrer VARCHAR(255))"
 const createClientTable = createTable + "CLIENT ()"
@@ -174,7 +175,7 @@ func (s *LogStore) Init(ctx context.Context) error {
 	s.uricache = make(map[string]string)
 	s.refercache = make(map[string]string)
 
-	s.selectLogFile, err = s.db.PrepareContext(ctx, "SELECT id FROM LOGFILE WHERE filename = ?")
+	s.selectLogFile, err = s.db.PrepareContext(ctx, "SELECT id,modified FROM LOGFILE WHERE filename = ?")
 	if err != nil {
 		fmt.Println(err)
 		return err
@@ -192,7 +193,7 @@ func (s *LogStore) Init(ctx context.Context) error {
 		return err
 	}
 
-	s.insertIPAddress, err = s.db.PrepareContext(ctx, "INSERT INTO LOGIP (id, ip) VALUES (?,?)")
+	s.insertIPAddress, err = s.db.PrepareContext(ctx, "INSERT INTO LOGIP (id, ip, name) VALUES (?,?,?)")
 	if err != nil {
 		fmt.Println(err)
 		return err
@@ -275,32 +276,38 @@ func (s *LogStore) LookupURI(uri string) (string, error) {
 }
 
 // LookupLogFile retrieves the file id of a log file
-func (s *LogStore) LookupLogFile(logfile string) (string, error) {
+func (s *LogStore) LookupLogFile(logfile string, modified time.Time) (string, time.Time, error) {
 	s.lfcMutex.Lock()
 	r := s.logfilecache[logfile]
 	s.lfcMutex.Unlock()
 	if r != "" {
-		return r, nil
+		return r, modified, nil
 	}
-	var id string
-	err := s.selectLogFile.QueryRow(logfile).Scan(&id)
+	var row struct {
+		id       string
+		modified time.Time
+	}
+	err := s.selectLogFile.QueryRow(logfile).Scan(&row)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			id = uuid.New().String()
-			_, err = s.insertLogFile.Exec(id, logfile, time.Now())
+			// insert a new record
+			row.id = uuid.New().String()
+			_, err = s.insertLogFile.Exec(row.id, logfile, modified)
 			if err != nil {
 				log.Printf("insert err: %v", err)
-				return "", err
+				return "", modified, err
 			}
 			s.lfcMutex.Lock()
-			s.logfilecache[logfile] = id
+			s.logfilecache[logfile] = row.id
 			s.lfcMutex.Unlock()
-			return id, nil
+			return row.id, modified, nil
 		}
 		log.Printf("select err: %v", err)
-		return "", err
+		return "", modified, err
 	}
-	return id, nil
+	// Compare the modified time and update if needed
+
+	return row.id, modified, nil
 }
 
 // LookupIPAddress retrieves the uuid for an ip address
@@ -316,7 +323,14 @@ func (s *LogStore) LookupIPAddress(ip string) (string, error) {
 	if err != nil {
 		if err == sql.ErrNoRows {
 			id = uuid.New().String()
-			_, err = s.insertIPAddress.Exec(id, ip)
+			var name string
+			names, err := net.LookupAddr(ip)
+			if err != nil || len(names) < 1 {
+				name = "unknown"
+			} else {
+				name = names[0]
+			}
+			_, err = s.insertIPAddress.Exec(id, ip, name)
 			if err != nil {
 				log.Printf("insert err: %v", err)
 				return "", err
@@ -376,7 +390,7 @@ func (s *LogStore) WriteHTTPLogEntry(ctx context.Context, entry httplog.Entry) e
 	// log.Printf("UUID: %v", uuid)
 
 	// Look up logfile (inserting if necessary)
-	fileID, err := s.LookupLogFile(entry.GetLogFile())
+	fileID, _, err := s.LookupLogFile(entry.GetLogFile(), entry.GetLogFileModified())
 
 	// Look up ip address (inserting if necessary)
 	s.LookupIPAddress(entry.GetIPAddress())

@@ -14,6 +14,7 @@ type EntryData struct {
 	isParseError    bool
 	logtype         string
 	logfile         string
+	logfileModified time.Time
 	IPAddress       string
 	ClientIdent     string
 	ClientAuth      string
@@ -34,7 +35,9 @@ type Entry interface {
 	IsParseError() bool
 	GetLogType() string
 	GetLogFile() string
+	GetLogFileModified() time.Time
 	SetLogFile(file string)
+	SetLogFileModified(modified time.Time)
 	GetUUID() []byte
 	GetIPAddress() string
 	GetClientIdent() string
@@ -58,6 +61,14 @@ func (e *EntryData) GetLogType() string {
 
 func (e *EntryData) GetLogFile() string {
 	return e.logfile
+}
+
+func (e *EntryData) GetLogFileModified() time.Time {
+	return e.logfileModified
+}
+
+func (e *EntryData) SetLogFileModified(modified time.Time) {
+	e.logfileModified = modified
 }
 
 func (e *EntryData) SetLogFile(file string) {

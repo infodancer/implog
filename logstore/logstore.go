@@ -2,6 +2,7 @@ package logstore
 
 import (
 	"context"
+	"time"
 
 	"github.com/infodancer/implog/httplog"
 )
@@ -16,7 +17,7 @@ type LogStore interface {
 	Init(ctx context.Context) error
 	// WriteHTTPLogEntry writes a single log entry
 	WriteHTTPLogEntry(ctx context.Context, entry httplog.Entry) error
-
+	LookupLogFile(logfile string, modified time.Time) (string, time.Time, error)
 	// Clear removes existing data from the log store, including tables
 	Clear(ctx context.Context) error
 	// Close closes the log store

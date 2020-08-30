@@ -119,6 +119,25 @@ func importLog(wg *sync.WaitGroup, file string, logtype string, store logstore.L
 	log.Printf("Processing: %v\n", file)
 	start := time.Now()
 
+	// Get the last modified time of the logfile
+	info, err := os.Stat(file)
+	if err != nil {
+		log.Printf("could not stat %v\n", file)
+		return err
+	}
+
+	// Compare it with the store modification time, if any
+	_, modified, err := store.LookupLogFile(file, info.ModTime())
+	if err != nil {
+		return err
+	}
+
+	// Check the date comparison and return if nothing new
+	if modified.After(info.ModTime()) || modified.Equal(info.ModTime()) {
+		log.Printf("Skipping %v because it already exists\n", file)
+		return nil
+	}
+
 	f, err := os.Open(file)
 	if err != nil {
 		log.Printf("could not read %v\n", file)
@@ -159,6 +178,7 @@ func importLog(wg *sync.WaitGroup, file string, logtype string, store logstore.L
 				continue
 			}
 			entrydata.SetLogFile(file)
+			entrydata.SetLogFileModified(info.ModTime())
 			err = store.WriteHTTPLogEntry(ctx, entrydata)
 			if err != nil {
 				log.Printf("error adding to store: %v", err)
