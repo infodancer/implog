@@ -11,6 +11,7 @@ import (
 	"time"
 
 	// Load the mysql driver
+	"github.com/go-sql-driver/mysql"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"github.com/infodancer/implog/httplog"
@@ -31,6 +32,7 @@ type LogStore struct {
 	insertLogEntry  *sql.Stmt
 	insertLogFile   *sql.Stmt
 	selectLogFile   *sql.Stmt
+	updateLogFile   *sql.Stmt
 	insertIPAddress *sql.Stmt
 	selectIPAddress *sql.Stmt
 	insertURI       *sql.Stmt
@@ -187,6 +189,12 @@ func (s *LogStore) Init(ctx context.Context) error {
 		return err
 	}
 
+	s.updateLogFile, err = s.db.PrepareContext(ctx, "UPDATE LOGFILE SET modified = ? where id = ?")
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
 	s.selectIPAddress, err = s.db.PrepareContext(ctx, "SELECT id FROM LOGIP WHERE ip = ?")
 	if err != nil {
 		fmt.Println(err)
@@ -287,7 +295,8 @@ func (s *LogStore) LookupLogFile(logfile string, modified time.Time) (string, ti
 		id       string
 		modified time.Time
 	}
-	err := s.selectLogFile.QueryRow(logfile).Scan(&row)
+	var nt mysql.NullTime
+	err := s.selectLogFile.QueryRow(logfile).Scan(&row.id, &nt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			// insert a new record
@@ -300,14 +309,33 @@ func (s *LogStore) LookupLogFile(logfile string, modified time.Time) (string, ti
 			s.lfcMutex.Lock()
 			s.logfilecache[logfile] = row.id
 			s.lfcMutex.Unlock()
-			return row.id, modified, nil
+
+			// return yesterday's date to ensure the new filw is processed
+			yesterday := time.Now().AddDate(0, 0, -1)
+			return row.id, yesterday, nil
 		}
 		log.Printf("select err: %v", err)
 		return "", modified, err
 	}
+	// Handle nulltime
+	if nt.Valid {
+		row.modified = nt.Time
+	} else {
+		row.modified = time.Now().AddDate(0, 0, -1)
+	}
 	// Compare the modified time and update if needed
+	if modified.After(row.modified) {
+		_, err = s.updateLogFile.Exec(modified, logfile)
+		if err != nil {
+			log.Printf("update err: %v", err)
+			return row.id, row.modified, err
+		}
+		s.lfcMutex.Lock()
+		s.logfilecache[logfile] = row.id
+		s.lfcMutex.Unlock()
+	}
 
-	return row.id, modified, nil
+	return row.id, row.modified, nil
 }
 
 // LookupIPAddress retrieves the uuid for an ip address
