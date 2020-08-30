@@ -31,6 +31,7 @@ func main() {
 	dbdriver := flag.String("dbdriver", "mysql", "The type of database to use as a log store (defaults to mysql)")
 	dbconnection := flag.String("dbconnection", "", "The name or ip address of the database host")
 	numCPU := flag.Int("cpu", 4, "The number of cpus to use simultaneously")
+	droptables := flag.Bool("droptables", false, "Drop and recreate the table structure")
 	// logname := flag.String("logname", "", "The name of the log being read (usually, the hostname of the virtual host)")
 	flag.Parse()
 
@@ -57,11 +58,13 @@ func main() {
 	}
 
 	fmt.Printf("Initializing logstore...\n")
-	fmt.Printf("Removing existing tables...\n")
-	err = store.Clear(context.Background())
-	if err != nil {
-		log.Println(err)
-		return
+	if *droptables {
+		fmt.Printf("Removing existing tables...\n")
+		err = store.Clear(context.Background())
+		if err != nil {
+			log.Println(err)
+			return
+		}
 	}
 	fmt.Printf("Creating new table structure...\n")
 	err = store.Init(context.Background())
@@ -134,6 +137,8 @@ func importLog(wg *sync.WaitGroup, file string, logtype string, store logstore.L
 
 	// Check the date comparison and return if nothing new
 	if modified.After(info.ModTime()) || modified.Equal(info.ModTime()) {
+		log.Printf("file modified: %v\n", info.ModTime())
+		log.Printf("db modified: %v\n", modified)
 		log.Printf("Skipping %v because it already exists\n", file)
 		return nil
 	}
