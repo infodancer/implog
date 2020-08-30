@@ -125,8 +125,7 @@ func ParseLogLine(line string) (*EntryData, error) {
 	// Hash the line for UUID to avoid duplicates
 	bytes := []byte(line)
 	hasher := sha1.New()
-	hasher.Write(bytes)
-	result.UUID = hasher.Sum(nil)
+	result.UUID = hasher.Sum(bytes)
 
 	words, err := parseEntryWords(line)
 	if err != nil {
