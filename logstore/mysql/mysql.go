@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -285,6 +286,8 @@ func (s *LogStore) LookupURI(uri string) (string, error) {
 
 // LookupLogFile retrieves the file id of a log file
 func (s *LogStore) LookupLogFile(logfile string, modified time.Time) (string, time.Time, error) {
+	// Because we can handle gzipped log files as input, we consider them without the extension
+	logfile = strings.TrimSuffix(logfile, ".gz")
 	s.lfcMutex.Lock()
 	r := s.logfilecache[logfile]
 	s.lfcMutex.Unlock()
