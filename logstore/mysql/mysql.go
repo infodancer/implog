@@ -49,14 +49,14 @@ const createLogFileTable = createTable + "LOGFILE (" + idField + ", filename VAR
 const createLogURITable = createTable + "LOGURI (" + idField + ", uri VARCHAR(255), created TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
 const createLogIPTable = createTable + "LOGIP (" + idField + ", ip VARCHAR(16), name VARCHAR(255), created TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
 const createLogReferrerTable = createTable + "LOGREFERRER (" + idField + ", uri VARCHAR(255), created TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
-const createLogEntryTable = createTable + "LOGENTRY (" + idField + ", logfile_id INT, loguri_id INT, ipaddress varchar(16), clientident varchar(255), clientauth varchar(255), clientversion varchar(255), requestmethod VARCHAR(16), requestprotocol VARCHAR(16), size BIGINT, status INT, referrer VARCHAR(255))"
+const createLogEntryTable = createTable + "LOGENTRY (" + idField + ", logname VARCHAR(255), logfile_id INT, loguri_id INT, ipaddress varchar(16), clientident varchar(255), clientauth varchar(255), clientversion varchar(255), requestmethod VARCHAR(16), requestprotocol VARCHAR(16), size BIGINT, status INT, referrer VARCHAR(255))"
 const createClientTable = createTable + "CLIENT ()"
 const dropLogFileTable = dropTable + " LOGFILE"
 const dropLogEntryTable = dropTable + " LOGENTRY"
 const dropLogURITable = dropTable + " LOGURI"
 const dropLogReferrerTable = dropTable + " LOGREFERRER"
 const dropLogIPTable = dropTable + " LOGIP"
-const insertQuery = "INSERT INTO LOGENTRY(id, logfile_id, loguri_id, ipaddress, clientident, clientauth, clientversion, requestmethod, requestprotocol, size, status, referrer) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
+const insertQuery = "INSERT INTO LOGENTRY(id, logname, logfile_id, loguri_id, ipaddress, clientident, clientauth, clientversion, requestmethod, requestprotocol, size, status, referrer) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
 
 // New defines the connection information for the log store
 func New(dbdriver string, dbconnection string) (*LogStore, error) {
@@ -428,7 +428,7 @@ func (s *LogStore) WriteHTTPLogEntry(ctx context.Context, entry httplog.Entry) e
 	referrerID, err := s.LookupReferrer(entry.GetReferrer())
 	// Insert log itself
 
-	_, err = s.insertLogEntry.ExecContext(ctx, uuid, fileID, uriID, entry.GetIPAddress(), entry.GetClientIdent(),
+	_, err = s.insertLogEntry.ExecContext(ctx, uuid, entry.GetLogName(), fileID, uriID, entry.GetIPAddress(), entry.GetClientIdent(),
 		entry.GetClientAuth(), entry.GetClientVersion(), entry.GetRequestMethod(), entry.GetRequestProtocol(),
 		entry.GetSize(), entry.GetStatus(), referrerID)
 	if err != nil {

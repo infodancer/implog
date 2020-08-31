@@ -32,10 +32,9 @@ func main() {
 	dbconnection := flag.String("dbconnection", "", "The name or ip address of the database host")
 	numCPU := flag.Int("cpu", 4, "The number of cpus to use simultaneously")
 	droptables := flag.Bool("droptables", false, "Drop and recreate the table structure")
-	// logname := flag.String("logname", "", "The name of the log being read (usually, the hostname of the virtual host)")
+	logname := flag.String("name", "", "The name of the log being read (usually, the hostname of the virtual host)")
 	flag.Parse()
 
-	fmt.Printf("Opening logstore...\n")
 	var store logstore.LogStore
 	if *dbdriver == "mysql" {
 		store, err = mysql.New(*dbdriver, *dbconnection)
@@ -57,7 +56,6 @@ func main() {
 		fmt.Printf("Unrecognized logstore type!")
 	}
 
-	fmt.Printf("Initializing logstore...\n")
 	if *droptables {
 		fmt.Printf("Removing existing tables...\n")
 		err = store.Clear(context.Background())
@@ -66,13 +64,11 @@ func main() {
 			return
 		}
 	}
-	fmt.Printf("Creating new table structure...\n")
 	err = store.Init(context.Background())
 	if err != nil {
 		log.Println(err)
 		return
 	}
-	fmt.Printf("Initialization complete\n")
 	defer store.Close()
 
 	files := make([]string, 0)
@@ -98,7 +94,6 @@ func main() {
 			return
 		}
 	}
-	log.Printf("Max goroutines: %v\n", *numCPU)
 	var wg sync.WaitGroup
 	cpu := 0
 	for _, lf := range files {
@@ -108,14 +103,14 @@ func main() {
 		}
 		cpu++
 		wg.Add(1)
-		go importLog(&wg, lf, *logtype, store)
+		go importLog(&wg, lf, *logname, *logtype, store)
 	}
 	wg.Wait()
 	log.Printf("Total inserted %v; total errors %v\n", totalCount, errorCount)
 }
 
 // importLog imports a line oriented log file, transparently handling gzip compression
-func importLog(wg *sync.WaitGroup, file string, logtype string, store logstore.LogStore) error {
+func importLog(wg *sync.WaitGroup, file string, logname string, logtype string, store logstore.LogStore) error {
 	defer wg.Done()
 	var fileInsertCount uint64
 	var fileErrorCount uint64
@@ -182,6 +177,7 @@ func importLog(wg *sync.WaitGroup, file string, logtype string, store logstore.L
 				log.Println(line)
 				continue
 			}
+			entrydata.SetLogName(logname)
 			entrydata.SetLogFile(file)
 			entrydata.SetLogFileModified(info.ModTime())
 			err = store.WriteHTTPLogEntry(ctx, entrydata)
