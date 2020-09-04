@@ -126,9 +126,17 @@ func (s *LogStore) Ping(ctx context.Context) error {
 	return nil
 }
 
+// PrintSchema displays the SQL to create the necessary tables
+func (s *LogStore) PrintSchema() {
+	fmt.Printf("Init: %v\n", createLogFileTable)
+	fmt.Printf("Init: %v\n", createLogURITable)
+	fmt.Printf("Init: %v\n", createLogIPTable)
+	fmt.Printf("Init: %v\n", createLogReferrerTable)
+	fmt.Printf("Init: %v\n", createLogEntryTable)
+}
+
 // Init creates the table structure for storing records, if necessary
 func (s *LogStore) Init(ctx context.Context) error {
-	fmt.Printf("Init()\n")
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		log.Fatal(err)
@@ -138,35 +146,30 @@ func (s *LogStore) Init(ctx context.Context) error {
 	defer tx.Rollback()
 	s.db.SetConnMaxLifetime(0)
 
-	fmt.Printf("Init: %v\n", createLogFileTable)
 	_, err = s.db.Exec(createLogFileTable)
 	if err != nil {
 		fmt.Println(err)
 		return err
 	}
 
-	fmt.Printf("Init: %v\n", createLogURITable)
 	_, err = s.db.Exec(createLogURITable)
 	if err != nil {
 		fmt.Println(err)
 		return err
 	}
 
-	fmt.Printf("Init: %v\n", createLogIPTable)
 	_, err = s.db.Exec(createLogIPTable)
 	if err != nil {
 		fmt.Println(err)
 		return err
 	}
 
-	fmt.Printf("Init: %v\n", createLogReferrerTable)
 	_, err = s.db.Exec(createLogReferrerTable)
 	if err != nil {
 		fmt.Println(err)
 		return err
 	}
 
-	fmt.Printf("Init: %v\n", createLogEntryTable)
 	_, err = s.db.Exec(createLogEntryTable)
 	if err != nil {
 		fmt.Println(err)
@@ -435,7 +438,6 @@ func (s *LogStore) WriteHTTPLogEntry(ctx context.Context, entry httplog.Entry) e
 		entry.GetClientAuth(), entry.GetClientVersion(), entry.GetRequestMethod(), entry.GetRequestProtocol(),
 		entry.GetSize(), entry.GetStatus(), referrerID)
 	if err != nil {
-		log.Printf("error inserting %v: %v", uuid, err)
 		return err
 	}
 	tx.Commit()

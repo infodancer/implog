@@ -75,7 +75,6 @@ func main() {
 	if len(*file) > 0 {
 		files = append(files, *file)
 	} else if len(*dir) > 0 {
-		fmt.Printf("reading dir: %v\n", *dir)
 		filecheck := func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				log.Println(err)
@@ -114,7 +113,6 @@ func importLog(wg *sync.WaitGroup, file string, logname string, logtype string, 
 	defer wg.Done()
 	var fileInsertCount uint64
 	var fileErrorCount uint64
-	log.Printf("Processing: %v\n", file)
 	start := time.Now()
 
 	// Get the last modified time of the logfile
@@ -132,9 +130,6 @@ func importLog(wg *sync.WaitGroup, file string, logname string, logtype string, 
 
 	// Check the date comparison and return if nothing new
 	if modified.After(info.ModTime()) || modified.Equal(info.ModTime()) {
-		log.Printf("file modified: %v\n", info.ModTime())
-		log.Printf("db modified: %v\n", modified)
-		log.Printf("Skipping %v because it already exists\n", file)
 		return nil
 	}
 
@@ -182,10 +177,13 @@ func importLog(wg *sync.WaitGroup, file string, logname string, logtype string, 
 			entrydata.SetLogFileModified(info.ModTime())
 			err = store.WriteHTTPLogEntry(ctx, entrydata)
 			if err != nil {
-				log.Printf("error adding to store: %v", err)
-				fileErrorCount++
+				if !strings.Contains(err.Error(), "Duplicate entry") {
+					log.Printf("error adding to store: %v", err)
+					fileErrorCount++
+				}
+			} else {
+				fileInsertCount++
 			}
-			fileInsertCount++
 		}
 		lc++
 	}
@@ -196,10 +194,14 @@ func importLog(wg *sync.WaitGroup, file string, logname string, logtype string, 
 
 	t := time.Now()
 	elapsed := t.Sub(start)
-	log.Printf("parsed %v lines in %v taking %v \n", lc, file, elapsed)
-	log.Printf("inserted %v; errors %v\n", fileInsertCount, fileErrorCount)
 	atomic.AddUint64(&errorCount, fileErrorCount)
 	atomic.AddUint64(&totalCount, fileInsertCount)
+
+	if fileInsertCount > 0 {
+		log.Printf("Processing: %v\n", file)
+		log.Printf("parsed %v lines in %v taking %v \n", lc, file, elapsed)
+		log.Printf("inserted %v; errors %v\n", fileInsertCount, fileErrorCount)
+	}
 	return nil
 }
 
