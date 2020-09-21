@@ -5,8 +5,8 @@ It's mostly a toy to learn database usage under go.  At the moment nothing exist
 
 ## Dependencies
 
-* [go-sql-driver for mysql]: https://github.com/go-sql-driver/mysql
-* [google uuid]: github.com/google/uuid
+* https://github.com/go-sql-driver/mysql
+* https://github.com/google/uuid
 * A MySQL or MariaDB database
 
 ## Usage
